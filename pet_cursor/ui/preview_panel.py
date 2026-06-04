@@ -29,13 +29,19 @@ class PreviewPanel(QLabel):
         self._scaled_pixmap: QPixmap | None = None
         self._pixmap_rect: tuple[int, int, int, int] | None = None
 
-    def set_image(self, image: Image.Image) -> None:
+    def set_image(self, image: Image.Image, hotspot: tuple[int, int] | None = None) -> None:
         self._source = image
-        bbox = image.getbbox()
-        if bbox:
-            self._hotspot = ((bbox[0] + bbox[2]) // 2, (bbox[1] + bbox[3]) // 2)
+        if hotspot is not None:
+            self._hotspot = (
+                max(0, min(image.width - 1, int(hotspot[0]))),
+                max(0, min(image.height - 1, int(hotspot[1]))),
+            )
         else:
-            self._hotspot = (image.width // 2, image.height // 2)
+            bbox = image.getbbox()
+            if bbox:
+                self._hotspot = ((bbox[0] + bbox[2]) // 2, (bbox[1] + bbox[3]) // 2)
+            else:
+                self._hotspot = (image.width // 2, image.height // 2)
         self.hotspot_changed.emit(*self._hotspot)
         self._rebuild_pixmap()
         self.update()

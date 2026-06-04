@@ -322,3 +322,108 @@ gh repo create myeongwooni/pet-cursor --public --source . --push
 ---
 
 > **운영 규칙**: 이 시점부터 의미 있는 작업(기능 추가, 문제 해결, 결정 변경)이 있을 때마다 본 파일 하단에 단계를 추가하고 git push 한다.
+
+---
+
+## 12. 9단계 (v2.0): 다중 시스템 커서 + 프리셋 저장
+
+### 12.1 요구
+- "텍스트, 대기 등 다른 시스템 커서도 교체하도록 추가해줘"
+- "업로드 했던 커서들을 최대 5까지 저장하고, 그 커서들을 불러와서 적용도 가능하게"
+
+§7 "향후 개선"에서 "높음" 우선순위로 잡혀있던 두 항목이 한 번에 들어옴.
+
+### 12.2 다중 커서 교체 설계
+
+- `core/cursor_applier.py`에 OCR_* 상수 + 한글 라벨 + 기본 체크 여부를 묶은 `SYSTEM_CURSORS` 리스트 추가 (14종: 화살표, 텍스트, 대기, 백그라운드 작업, 링크 선택, 도움말, 정밀, 사용 안 함, 이동, 4가지 크기 조정, 수직 화살표).
+- `apply_cursor(cur_path, targets: list[int])` 시그니처로 변경.
+
+**구현 함정 — HCURSOR 소유권**
+`SetSystemCursor`는 전달된 HCURSOR의 소유권을 OS가 가져간다. 동일 핸들을 두 번 호출하면 두 번째는 무효 핸들 → 실패. 매 타겟마다 `LoadCursorFromFileW`를 다시 호출해 새 핸들을 받아야 함.
+
+```python
+for ocr in targets:
+    hcursor = LoadCursorFromFileW(path)
+    if not SetSystemCursor(hcursor, ocr): raise OSError(...)
+```
+
+- 복원은 변경 없음 — `SystemParametersInfo(SPI_SETCURSORS)`가 한 호출로 모든 시스템 커서를 사용자 기본값으로 되돌림.
+
+### 12.3 다중 커서 UI
+
+- `ui/cursor_targets_panel.py` — `QGroupBox` 안에 14개 체크박스를 4열 그리드로 배치.
+- 상단에 "전체 선택 / 전체 해제 / 기본만(화살표만)" 토글 버튼.
+- `selected() -> list[int]` / `set_selected(list[int])` 페어로 상태 동기화 (프리셋 로드 시 사용).
+- 체크박스에 `setProperty("ocr", id)`로 OCR id 부착 → 라벨/순서 변경에도 안전.
+
+### 12.4 프리셋 저장소 설계
+
+**저장 위치**: `%LOCALAPPDATA%\PetCursor\presets\slot_{0..4}\`
+
+각 슬롯에 두 파일:
+- `image.png` — 누끼가 끝난 RGBA 원본 (재편집/썸네일 모두 이걸로)
+- `meta.json` — `{"hotspot": [x, y], "targets": [32512, ...]}`
+
+**선택 이유**: 단순/투명. SQLite/INI 같은 것 안 쓰고 폴더 하나가 한 프리셋. 사용자가 파일 탐색기에서도 알아볼 수 있음.
+
+`core/preset_store.py`의 `PresetStore` API:
+- `exists(slot)`, `load(slot) -> Preset | None`, `save(slot, image, hotspot, targets)`, `delete(slot)`, `first_empty()`
+- `Preset` 데이터클래스(slot, image, hotspot, targets)
+
+### 12.5 프리셋 UI
+
+- `ui/presets_panel.py` — 5개의 정사각(80×80) 슬롯 버튼.
+- 채워진 슬롯: 72px 썸네일 (RGBA를 다크 배경에 알파 컴포지트).
+- 빈 슬롯: 다크 배경에 "+" 텍스트.
+- 좌클릭 동작:
+  - 빈 슬롯 → 현재 상태 저장
+  - 채워진 슬롯 → 로드 (이미지/핫스팟/타겟 복원)
+- 우클릭 → 컨텍스트 메뉴 (불러오기 / 덮어쓰기 / 삭제).
+- 시그널: `save_requested(slot)`, `load_requested(slot)`, `delete_requested(slot)` → `MainWindow`가 받아 `PresetStore`/`PreviewPanel`/`CursorTargetsPanel`을 조율.
+
+### 12.6 `PreviewPanel` 변경
+
+`set_image(image, hotspot=None)` — 옵션 인자로 초기 핫스팟 override 가능. 프리셋 로드 시 저장된 핫스팟을 그대로 복원하기 위함. None이면 종전대로 불투명 bbox 중심.
+
+### 12.7 메인 윈도우 통합
+
+레이아웃 추가 순서 (위 → 아래):
+
+```
+[DropZone | PreviewPanel]
+[status label]
+[progress bar]
+[CursorTargetsPanel  ← 신규]
+[PresetsPanel        ← 신규]
+[Apply | Restore]
+```
+
+윈도우 크기 760×520 → 820×760.
+
+### 12.8 UX 결정
+
+| 항목 | 결정 | 근거 |
+|---|---|---|
+| 기본 체크 | OCR_NORMAL만 | 기존 동작 보존 — "적용" 클릭이 이전과 같은 효과 |
+| 적용 전 검증 | 0개 선택 시 안내 다이얼로그 | 사고 방지 |
+| 복원 범위 | 모든 시스템 커서 일괄 | 부분 복원은 OS API 없음(전부 or 하나도 안 함) |
+| 프리셋 슬롯 수 | 5 | 사용자 요청 그대로 |
+| 프리셋 메타에 타겟 포함 | yes | "이 반려동물 사진을 '대기+화살표'에만 적용"같은 조합도 한 번에 재현 |
+| 저장 시 원본/누끼본 중 무엇 | 누끼본(RGBA PNG) | rembg 재실행 비용 회피 + 결과 안정성 |
+
+### 12.9 변경 파일 요약
+
+| 파일 | 변경 |
+|---|---|
+| `pet_cursor/core/cursor_applier.py` | `SYSTEM_CURSORS` 추가, `apply_cursor` 다중 타겟 |
+| `pet_cursor/core/preset_store.py` | **신규** — 파일 시스템 기반 프리셋 |
+| `pet_cursor/ui/cursor_targets_panel.py` | **신규** — 체크박스 그룹 |
+| `pet_cursor/ui/presets_panel.py` | **신규** — 5슬롯 썸네일 버튼 |
+| `pet_cursor/ui/preview_panel.py` | `set_image`에 `hotspot=None` override |
+| `pet_cursor/ui/main_window.py` | 두 패널 통합 + 저장/로드/삭제 핸들러 |
+
+### 12.10 비 진행 항목
+
+- "전체 복원"은 OS가 일괄 단위만 지원하므로 "선택한 커서만 복원" UI는 의도적으로 빼둠. 필요해지면 적용 전 원본 HCURSOR를 백업해 두는 방식으로 v3에서 가능.
+- 프리셋 이름 부여(현재는 슬롯 번호만) — v3 후보.
+- 프리셋을 다른 PC로 내보내기/가져오기(zip) — v3 후보.
