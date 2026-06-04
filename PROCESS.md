@@ -213,3 +213,112 @@ pyinstaller --onefile --windowed --name PetCursor main.py
 | 2026-06-04 | 영구 적용: 세션 한정 | 사용자 복구 용이성 |
 | 2026-06-04 | 핫스팟 기본값: bbox 중심 + 클릭 편집 | 자동 추정 + 미세 조정 |
 | 2026-06-04 | MVP 커서 범위: `OCR_NORMAL`만 | 범위 최소화, 검증 우선 |
+| 2026-06-04 | 빌드 분배 모드: onedir 기본 | onefile은 매 실행 시 ~360MB를 %TEMP%로 풀어 시작 ~10초+ 지연. onedir은 폴더 전체 복사 필요하지만 빠름 |
+| 2026-06-04 | 부팅 표시: PyInstaller `Splash()` (Qt 아닌 C 부트로더) | QSplashScreen은 QApplication 시작 이후라 가장 느린 구간을 못 가림. PyInstaller 스플래시는 Python 인터프리터 시작 전부터 표시 |
+| 2026-06-04 | GitHub 공개: public + MIT | 본인 포트폴리오용 공개. 의존성 모두 OSS |
+
+---
+
+## 9. 6단계: 패키징 (PyInstaller)
+
+### 9.1 환경 셋업
+이 시스템에 Python이 없어 빌드 환경을 처음부터 구성:
+
+```powershell
+winget install Python.Python.3.12 --silent --scope user
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install pyinstaller
+```
+
+### 9.2 만난 문제와 해결
+
+PyInstaller로 GUI + AI 모델 앱을 패키징할 때 만나는 거의 표준 함정들을 다 밟음.
+
+**문제 1 — PowerShell 5.1에서 `pwsh` 명령 없음**
+- 원인: PowerShell 7(`pwsh`)이 미설치. 5.1만 있는 환경.
+- 해결: 빌드 호출을 `powershell.exe` 또는 `& <script>`로 변경.
+
+**문제 2 — `$ErrorActionPreference = "Stop"` + 네이티브 stderr가 충돌**
+- 원인: PowerShell 5.1은 네이티브 명령의 stderr 한 줄까지 NativeCommandError로 감싼다. Stop 모드에서는 PyInstaller가 INFO 로그를 stderr에 찍는 순간 스크립트가 죽음.
+- 해결: `build.ps1`에서 `$ErrorActionPreference = "Stop"` 제거. 각 네이티브 단계 직후 `$LASTEXITCODE` 명시 체크하는 헬퍼 `Check()` 도입.
+
+**문제 3 — `PackageNotFoundError: No package metadata was found for pymatting`**
+- 원인: `pymatting/__init__.py`가 import 시 `importlib.metadata.version("pymatting")`을 호출. PyInstaller는 기본적으로 `.dist-info`를 안 포함.
+- 해결: spec에서 `copy_metadata()`로 의심 패키지 메타데이터 일괄 번들링.
+  ```python
+  for _pkg in ("pymatting", "rembg", "onnxruntime", "numba", "llvmlite", "scipy", "numpy", "Pillow"):
+      try: datas += copy_metadata(_pkg)
+      except Exception: pass
+  ```
+
+**문제 4 — `AttributeError: 'NoneType' object has no attribute 'write'`**
+- 원인: PyInstaller `--windowed` 빌드는 `sys.stdout`/`sys.stderr`를 `None`으로 설정. rembg → pooch → tqdm 체인이 모델 다운로드/추론 진행률을 stderr에 쓰려다 죽음.
+- 해결: `main.py` 최상단에서 None일 경우 `os.devnull`로 리다이렉트.
+  ```python
+  if sys.stdout is None: sys.stdout = open(os.devnull, "w")
+  if sys.stderr is None: sys.stderr = open(os.devnull, "w")
+  ```
+
+**문제 5 — 재빌드 시 `PermissionError [WinError 5]`**
+- 원인: 사용자가 이전 빌드 exe를 실행 중. 일부 인스턴스는 (사용자 다른 권한으로) 강제 종료 불가.
+- 해결: `--distpath dist2`로 별도 폴더 빌드. `.gitignore`에 `dist3/`까지 미리 추가.
+
+### 9.3 산출물
+- **onedir (기본)**: `dist2\PetCursor\PetCursor.exe` (런처 16 MB) + `_internal\` (~368 MB)
+- **onefile**: `build.ps1 -OneFile` 플래그로 전환 — 시작 ~10초+ 지연 트레이드오프
+
+---
+
+## 10. 7단계: 시작 속도 체감 개선 — 스플래시 스크린
+
+### 10.1 문제
+사용자 보고: "exe 파일 실행하고 너무 늦게 뜨는데". windowed 빌드는 C 부트로더 → Python 인터프리터 부팅 → onnxruntime/PySide6 import까지 수 초 동안 화면에 아무것도 안 뜸. 사용자가 더블클릭이 먹혔는지조차 모름.
+
+### 10.2 선택
+- `QSplashScreen`(Qt): QApplication 이후라 가장 느린 구간(인터프리터+import) 못 가림.
+- **PyInstaller `Splash()`**: C 부트로더가 Python 시작 전부터 PNG 표시. → 채택.
+
+### 10.3 구현
+- `assets/make_splash.py`로 480×260 다크 테마 PNG 생성 (PIL로 한 번에 만들고 커밋).
+- `pet_cursor.spec`에 `Splash(...)` 추가, EXE/COLLECT에 `splash`/`splash.binaries` 전달.
+- `main.py`에서 단계별 텍스트 갱신:
+  ```python
+  _splash("loading Qt...")
+  from PySide6.QtWidgets import QApplication
+  _splash("loading model runtime...")
+  from pet_cursor.ui.main_window import MainWindow
+  ...
+  pyi_splash.close()  # MainWindow.show() 직후
+  ```
+- `pyi_splash`는 PyInstaller 번들 안에서만 존재하므로 `try/except ImportError`로 소스 실행 시에도 정상 동작.
+
+---
+
+## 11. 8단계: GitHub 공개
+
+### 11.1 준비물
+- `README.md` — 배지, 기능, 빠른 실행, 빌드 가이드, 프로젝트 구조, 동작 원리
+- `LICENSE` — MIT
+- `.gitignore` — `.venv`, `build`, `dist*`, `.claude`, `build.log`
+
+### 11.2 자동화 흐름
+```powershell
+winget install GitHub.cli --silent --scope user
+gh auth login --hostname github.com --git-protocol https --web   # 사용자 인터랙티브
+gh repo create myeongwooni/pet-cursor --public --source . --push
+```
+
+`gh auth login`은 브라우저 인증이 필요해 사용자가 직접 실행. 나머지는 일괄 자동화.
+
+### 11.3 만난 사소한 문제
+- 사용자가 명령을 두 줄로 붙여넣어 `gh.exe`만 실행되고 `auth login`이 별도 명령으로 해석됨 → 한 줄로 재전송.
+- 초기 `git add -A`가 `.claude/` 내부 파일을 같이 스테이징 → `.gitignore`에 추가 + `git rm --cached -rf .claude`.
+
+### 11.4 결과
+- 저장소: https://github.com/myeongwooni/pet-cursor
+- 공개, MIT, main 브랜치, 첫 커밋에 모든 소스 + 문서 포함 (빌드 산출물 제외)
+
+---
+
+> **운영 규칙**: 이 시점부터 의미 있는 작업(기능 추가, 문제 해결, 결정 변경)이 있을 때마다 본 파일 하단에 단계를 추가하고 git push 한다.
