@@ -53,7 +53,7 @@
 
 <img src="docs/images/04-applied.png" alt="적용 완료 및 프리셋 저장" width="600">
 
-> 스크린샷의 반려동물은 예시용 일러스트입니다.
+> 스크린샷의 누끼 결과는 앱과 같은 `rembg` (`isnet-general-use`) 모델로 실제 처리한 결과입니다.
 
 ## 빠른 실행 (배포본)
 
