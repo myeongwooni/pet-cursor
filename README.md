@@ -9,6 +9,16 @@
 
 ---
 
+## 다운로드 및 실행
+
+**[Windows 64비트용 Pet Cursor 다운로드](https://github.com/myeongwooni/pet-cursor/releases/latest/download/PetCursor-win64.zip)**
+
+1. ZIP 파일을 다운로드하고 **전체 압축을 해제**합니다.
+2. 압축 해제한 폴더에서 `PetCursor.exe`를 실행합니다. `_internal` 폴더도 함께 있어야 합니다.
+3. 사진을 선택하고 배경 제거가 끝나면 클릭 위치를 지정한 뒤 **커서로 적용**을 누릅니다.
+
+Windows 10/11 64비트 전용입니다. 설치와 Python은 필요하지 않습니다. 첫 배경 제거 시 모델 약 170MB를 다운로드하므로 인터넷 연결과 여유 저장 공간이 필요합니다. 사진 처리는 PC에서 수행됩니다. 서명되지 않은 앱이라 Windows SmartScreen 경고가 나타날 수 있습니다. 커서를 되돌리려면 **원본 복원**을 누르세요. 실행 파일은 [릴리스 페이지](https://github.com/myeongwooni/pet-cursor/releases)에서도 받을 수 있습니다.
+
 ## 기능
 
 - **자동 누끼**: `rembg` (`isnet-general-use` 모델) 로컬 실행. 반려동물 털 가장자리에 잘 맞음.
@@ -55,12 +65,6 @@
 
 > 스크린샷의 누끼 결과는 앱과 같은 `rembg` (`isnet-general-use`) 모델로 실제 처리한 결과입니다.
 
-## 빠른 실행 (배포본)
-
-릴리즈에서 `PetCursor-win64.zip` 다운로드 → 압축 풀고 `PetCursor.exe` 실행.
-
-> 첫 실행 시 rembg가 모델(~170 MB)을 `~/.u2net/`에 1회 다운로드합니다.
-
 ## 개발 환경 실행
 
 요구사항: Windows 10/11, Python 3.12+
@@ -78,11 +82,15 @@ python main.py
 
 옵션:
 - `-Clean` — `.venv`, `build`, `dist` 모두 삭제하고 처음부터
-- `-OneFile` — 단일 `.exe`로 빌드 (배포 편하지만 시작이 ~10초 느려짐)
+- `-OneFile` — 단일 `.exe`로 빌드 (배포 편하지만 시작이 느려짐). spec 파일은 변경하지 않습니다.
 
 산출물:
 - onedir(기본): `dist\PetCursor\PetCursor.exe` + `_internal\` 폴더 (전체 ~380 MB)
 - onefile: `dist\PetCursor.exe` 하나
+
+## 배포 관리
+
+`main`에 릴리스 워크플로가 반영되면 Windows에서 빌드하고 ZIP과 SHA-256 체크섬을 GitHub Releases의 `v1.0.0`에 게시합니다. 워크플로는 수동으로도 실행할 수 있으며 동일 태그가 이미 있다면 덮어쓰지 않습니다. 이후 새 버전을 배포할 때는 워크플로의 태그를 새 버전으로 변경하세요. Actions 빌드가 성공하고 릴리스가 게시된 뒤 다운로드 링크가 동작합니다.
 
 ## 프로젝트 구조
 
@@ -127,3 +135,4 @@ pet_cursor/
 ## 라이선스
 
 MIT
+

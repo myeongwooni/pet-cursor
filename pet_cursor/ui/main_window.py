@@ -76,6 +76,10 @@ class MainWindow(QMainWindow):
         self._cursor_applied = False
 
     def on_file_selected(self, path: str):
+        if self._worker is not None:
+            return
+        self.drop_zone.setEnabled(False)
+        self.presets_panel.setEnabled(False)
         self.drop_zone.show_preview(path)
         self.status.setText("누끼 따는 중... (첫 실행 시 모델 다운로드, ~170MB)")
         self.progress.show()
@@ -84,7 +88,13 @@ class MainWindow(QMainWindow):
         self._worker = BgRemoverWorker(path)
         self._worker.finished_ok.connect(self.on_bg_removed)
         self._worker.failed.connect(self.on_bg_failed)
+        self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
+
+    def _on_worker_finished(self):
+        self._worker = None
+        self.drop_zone.setEnabled(True)
+        self.presets_panel.setEnabled(True)
 
     def on_bg_removed(self, img: Image.Image):
         self.progress.hide()
@@ -96,7 +106,7 @@ class MainWindow(QMainWindow):
 
     def on_bg_failed(self, msg: str):
         self.progress.hide()
-        self.status.setText("누끼 실패")
+        self.status.setText("누끼 실패. 이미지나 인터넷 연결을 확인한 뒤 다시 시도해 주세요.")
         QMessageBox.critical(self, "누끼 실패", msg)
 
     def _on_hotspot_changed(self, x: int, y: int):
@@ -171,6 +181,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "삭제 실패", f"{type(e).__name__}: {e}")
 
     def closeEvent(self, event):
+        if self._worker is not None:
+            QMessageBox.information(self, "처리 중", "이미지 처리가 끝난 뒤 종료해 주세요.")
+            event.ignore()
+            return
         if self._cursor_applied:
             reply = QMessageBox.question(
                 self, "종료 확인",
@@ -183,6 +197,9 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.Yes:
                 try:
                     cursor_applier.restore_cursor()
-                except Exception:
-                    pass
+                except Exception as e:
+                    QMessageBox.critical(self, "복원 실패", f"커서를 복원하지 못했습니다: {e}")
+                    event.ignore()
+                    return
         event.accept()
+

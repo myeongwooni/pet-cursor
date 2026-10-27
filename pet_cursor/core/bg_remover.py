@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
-from PIL import Image
+from PIL import Image, ImageOps
 from rembg import remove, new_session
 
 
@@ -23,10 +23,12 @@ class BgRemoverWorker(QThread):
 
     def run(self):
         try:
-            img = Image.open(self._path).convert("RGBA")
+            with Image.open(self._path) as source:
+                img = ImageOps.exif_transpose(source).convert("RGBA")
             result = remove(img, session=self.get_session())
             if result.mode != "RGBA":
                 result = result.convert("RGBA")
             self.finished_ok.emit(result)
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")
+

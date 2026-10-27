@@ -11,9 +11,11 @@
 # ruff: noqa
 # type: ignore
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
-ONEFILE = False  # flip to True for single-exe build
+ONEFILE = os.environ.get("PET_CURSOR_ONEFILE") == "1"
 
 hiddenimports = []
 hiddenimports += collect_submodules("onnxruntime")
@@ -120,3 +122,4 @@ else:
         upx_exclude=[],
         name="PetCursor",
     )
+

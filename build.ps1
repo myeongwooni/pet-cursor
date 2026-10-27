@@ -55,11 +55,8 @@ Step "Installing PyInstaller"
 & $PyVenv -m pip install pyinstaller
 Check "pip install pyinstaller"
 
-if ($OneFile) {
-    Step "Patching spec to ONEFILE=True"
-    $spec = Join-Path $Root "pet_cursor.spec"
-    (Get-Content $spec) -replace "^ONEFILE = False", "ONEFILE = True" | Set-Content $spec
-}
+# The spec reads this environment variable without changing tracked files.
+$env:PET_CURSOR_ONEFILE = if ($OneFile) { "1" } else { "0" }
 
 Step "Running PyInstaller"
 & $PyVenv -m PyInstaller --noconfirm (Join-Path $Root "pet_cursor.spec")
@@ -72,3 +69,4 @@ if ($OneFile) {
     Write-Host "Output: $Root\dist\PetCursor\PetCursor.exe" -ForegroundColor Green
     Write-Host "Distribute the entire 'PetCursor' folder." -ForegroundColor Yellow
 }
+
